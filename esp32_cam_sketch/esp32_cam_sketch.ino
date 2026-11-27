@@ -20,7 +20,7 @@
 // ======================== USER CONFIG ========================
 const char* ssid          = "YOUR_WIFI_SSID";
 const char* password      = "YOUR_WIFI_PASSWORD";
-const char* serverAddress = "Server IP Address";  // Flask server IP
+const char* serverAddress = "https://smart-robotic-arm.onrender.com";
 
 // Force sensor / limit switch pin
 #define PICKUP_SENSOR_PIN 13   // GPIO 13 – change as needed
