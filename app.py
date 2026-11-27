@@ -276,11 +276,12 @@ def download_file(filename):
 
 
 # ---------------------------------------------------------------------------
-# Start-up
+# Start-up (runs on import – needed for gunicorn / Render)
 # ---------------------------------------------------------------------------
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+init_db()
+
 if __name__ == "__main__":
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    init_db()
     print("=" * 60)
     print("  Smart Robotic Arm – Monitoring Web App")
     print("  Open http://127.0.0.1:5000 in your browser")
