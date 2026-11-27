@@ -1,11 +1,12 @@
 """
 Smart Robotic Arm – Object Detection & Monitoring Web Application
-Flask backend with SQLite database, ESP32-CAM image reception, and REST API.
+Flask backend with PostgreSQL (Neon) database, ESP32-CAM image reception, and REST API.
 """
 
 import os
 import time
-import sqlite3
+import psycopg2
+import psycopg2.extras
 from datetime import datetime
 from flask import (
     Flask, render_template, request, jsonify, send_from_directory, redirect, url_for
@@ -17,12 +18,18 @@ from werkzeug.utils import secure_filename
 # ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
-DATABASE = os.path.join(BASE_DIR, "database.db")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "bmp"}
+
+# PostgreSQL connection string (Neon)
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://neondb_owner:npg_ufSi7v1tZxVC@ep-withered-frog-be1kjlqi-pooler.c-9.us-east-2.aws.neon.tech/neondb?sslmode=require"
+)
 
 app = Flask(__name__)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB max upload
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-key")
 
 # Track ESP32-CAM heartbeat (epoch seconds)
 esp32_last_seen: float = 0.0
@@ -39,19 +46,19 @@ scanning_active: bool = False
 # Database helpers
 # ---------------------------------------------------------------------------
 def get_db():
-    """Return a new database connection (with Row factory)."""
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
+    """Return a new PostgreSQL connection (with RealDictCursor)."""
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
 
 
 def init_db():
     """Create the pickup_history table if it doesn't exist."""
     conn = get_db()
-    conn.execute(
+    cur = conn.cursor()
+    cur.execute(
         """
         CREATE TABLE IF NOT EXISTS pickup_history (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            id              SERIAL PRIMARY KEY,
             image_path      TEXT    NOT NULL,
             pickup_status   TEXT    NOT NULL DEFAULT 'Picked',
             captured_date   TEXT    NOT NULL,
@@ -60,6 +67,7 @@ def init_db():
         """
     )
     conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -74,6 +82,14 @@ def is_esp32_connected() -> bool:
     return (time.time() - esp32_last_seen) < ESP32_TIMEOUT
 
 
+def row_to_dict(row, cur):
+    """Convert a psycopg2 row tuple to a dict using cursor description."""
+    if row is None:
+        return None
+    columns = [desc[0] for desc in cur.description]
+    return dict(zip(columns, row))
+
+
 # ---------------------------------------------------------------------------
 # Web routes
 # ---------------------------------------------------------------------------
@@ -81,9 +97,11 @@ def is_esp32_connected() -> bool:
 def dashboard():
     """Render the main dashboard."""
     conn = get_db()
-    latest = conn.execute(
-        "SELECT * FROM pickup_history ORDER BY id DESC LIMIT 1"
-    ).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pickup_history ORDER BY id DESC LIMIT 1")
+    row = cur.fetchone()
+    latest = row_to_dict(row, cur)
+    cur.close()
     conn.close()
     return render_template(
         "dashboard.html",
@@ -102,18 +120,24 @@ def history():
 
     query = "SELECT * FROM pickup_history WHERE 1=1"
     params: list = []
+    param_idx = 1
 
     if search:
-        query += " AND (captured_date LIKE ? OR captured_time LIKE ?)"
+        query += f" AND (captured_date LIKE %s OR captured_time LIKE %s)"
         params += [f"%{search}%", f"%{search}%"]
     if status_filter:
-        query += " AND pickup_status = ?"
+        query += f" AND pickup_status = %s"
         params.append(status_filter)
 
     query += " ORDER BY id DESC"
 
     conn = get_db()
-    records = conn.execute(query, params).fetchall()
+    cur = conn.cursor()
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    columns = [desc[0] for desc in cur.description]
+    records = [dict(zip(columns, row)) for row in rows]
+    cur.close()
     conn.close()
     return render_template("history.html", records=records, search=search, status_filter=status_filter)
 
@@ -160,8 +184,9 @@ def upload_image():
 
     # Store in database
     conn = get_db()
-    conn.execute(
-        "INSERT INTO pickup_history (image_path, pickup_status, captured_date, captured_time) VALUES (?, ?, ?, ?)",
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO pickup_history (image_path, pickup_status, captured_date, captured_time) VALUES (%s, %s, %s, %s)",
         (
             f"uploads/{filename}",
             pickup_status,
@@ -170,6 +195,7 @@ def upload_image():
         ),
     )
     conn.commit()
+    cur.close()
     conn.close()
 
     return jsonify({"status": "ok", "filename": filename}), 200
@@ -179,26 +205,18 @@ def upload_image():
 def api_status():
     """Return current connection + pickup status (polled by dashboard JS)."""
     conn = get_db()
-    latest = conn.execute(
-        "SELECT * FROM pickup_history ORDER BY id DESC LIMIT 1"
-    ).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pickup_history ORDER BY id DESC LIMIT 1")
+    row = cur.fetchone()
+    latest = row_to_dict(row, cur)
+    cur.close()
     conn.close()
-
-    latest_dict = None
-    if latest:
-        latest_dict = {
-            "id": latest["id"],
-            "image_path": latest["image_path"],
-            "pickup_status": latest["pickup_status"],
-            "captured_date": latest["captured_date"],
-            "captured_time": latest["captured_time"],
-        }
 
     return jsonify(
         {
             "connected": is_esp32_connected(),
             "pickup_status": current_pickup_status,
-            "latest": latest_dict,
+            "latest": latest,
             "scanning": scanning_active,
         }
     )
@@ -214,28 +232,23 @@ def api_history():
     params: list = []
 
     if search:
-        query += " AND (captured_date LIKE ? OR captured_time LIKE ?)"
+        query += " AND (captured_date LIKE %s OR captured_time LIKE %s)"
         params += [f"%{search}%", f"%{search}%"]
     if status_filter:
-        query += " AND pickup_status = ?"
+        query += " AND pickup_status = %s"
         params.append(status_filter)
 
     query += " ORDER BY id DESC"
 
     conn = get_db()
-    rows = conn.execute(query, params).fetchall()
+    cur = conn.cursor()
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    columns = [desc[0] for desc in cur.description]
+    records = [dict(zip(columns, row)) for row in rows]
+    cur.close()
     conn.close()
 
-    records = [
-        {
-            "id": r["id"],
-            "image_path": r["image_path"],
-            "pickup_status": r["pickup_status"],
-            "captured_date": r["captured_date"],
-            "captured_time": r["captured_time"],
-        }
-        for r in rows
-    ]
     return jsonify(records)
 
 
