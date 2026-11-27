@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Smart Robotic Arm{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+  <!-- ===== Navbar ===== -->
+  <nav class="navbar">
+    <a href="/" class="logo">
+      <!-- Robotic arm icon -->
+      <div class="logo-icon">
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Base platform -->
+          <rect x="8" y="40" width="32" height="5" rx="2.5" fill="url(#grad1)" opacity="0.9"/>
+          <!-- Vertical pillar -->
+          <rect x="21" y="22" width="6" height="20" rx="2" fill="url(#grad2)"/>
+          <!-- Lower arm segment -->
+          <rect x="12" y="18" width="22" height="6" rx="3" fill="url(#grad1)" stroke="url(#grad3)" stroke-width="1"/>
+          <!-- Joint circle -->
+          <circle cx="13" cy="21" r="4" fill="url(#grad2)" stroke="url(#grad3)" stroke-width="1"/>
+          <!-- Upper arm segment (angled) -->
+          <rect x="3" y="8" width="14" height="5" rx="2.5" fill="url(#grad1)" stroke="url(#grad3)" stroke-width="1" transform="rotate(30, 13, 15)"/>
+          <!-- Gripper / claw -->
+          <path d="M4 5 L1 1" stroke="url(#grad3)" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M4 5 L7 1" stroke="url(#grad3)" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="4" cy="5" r="1.5" fill="url(#grad3)"/>
+          <!-- Shoulder joint -->
+          <circle cx="24" cy="21" r="3" fill="url(#grad3)" opacity="0.8"/>
+          <!-- Gradients -->
+          <defs>
+            <linearGradient id="grad1" x1="0" y1="0" x2="48" y2="48">
+              <stop offset="0%" stop-color="#4fc3f7"/>
+              <stop offset="100%" stop-color="#7c4dff"/>
+            </linearGradient>
+            <linearGradient id="grad2" x1="0" y1="0" x2="0" y2="48">
+              <stop offset="0%" stop-color="#4fc3f7"/>
+              <stop offset="100%" stop-color="#0288d1"/>
+            </linearGradient>
+            <linearGradient id="grad3" x1="0" y1="0" x2="48" y2="0">
+              <stop offset="0%" stop-color="#ab47bc"/>
+              <stop offset="100%" stop-color="#4fc3f7"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <span class="logo-text">Smart <span class="logo-highlight">Robotic</span> Arm</span>
+    </a>
+    <div class="nav-links">
+      <a href="/" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a>
+      <a href="/history" class="{% if request.endpoint == 'history' %}active{% endif %}">Pickup History</a>
+    </div>
+  </nav>
+
+  <!-- ===== Main Content ===== -->
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- ===== Lightbox ===== -->
+  <div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
+    <span class="lightbox-close">&times;</span>
+    <img id="lightbox-img" src="" alt="Full-size image" />
+  </div>
+
+  <script>
+    function openLightbox(src) {
+      document.getElementById('lightbox-img').src = src;
+      document.getElementById('lightbox').classList.add('active');
+    }
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('active');
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

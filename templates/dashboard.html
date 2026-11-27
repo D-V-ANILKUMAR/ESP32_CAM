@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – Smart Robotic Arm{% endblock %}
+
+{% block content %}
+<!-- Page Header + Scan Button -->
+<div class="page-header-row">
+  <div class="page-header">
+    <h1>🤖 Dashboard</h1>
+    <p>Real-time monitoring of ESP32-CAM &amp; robotic arm pickup status</p>
+  </div>
+  <button class="scan-btn {% if scanning %}active{% endif %}" id="scan-btn" onclick="toggleScanning()">
+    <span class="scan-btn-icon" id="scan-btn-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+      </svg>
+    </span>
+    <span class="scan-btn-text" id="scan-btn-text">{{ "Stop Scanning" if scanning else "Start Scanning" }}</span>
+    <span class="scan-btn-pulse" id="scan-btn-pulse"></span>
+  </button>
+</div>
+
+<!-- ===== Status Cards ===== -->
+<div class="status-row">
+  <!-- Connection Status -->
+  <div class="status-card" id="card-conn">
+    <div class="status-icon {% if connected %}conn{% else %}disconn{% endif %}" id="conn-icon">
+      <span id="conn-emoji">{% if connected %}📡{% else %}🔌{% endif %}</span>
+    </div>
+    <div class="status-info">
+      <h3>ESP32-CAM Status</h3>
+      <div class="status-value {% if connected %}connected{% else %}disconnected{% endif %}" id="conn-text">
+        <span class="live-dot {% if connected %}green{% else %}red{% endif %}" id="conn-dot"></span>
+        <span id="conn-label">{{ "Connected" if connected else "Disconnected" }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pickup Status -->
+  <div class="status-card" id="card-pickup">
+    <div class="status-icon {% if pickup_status == 'Picked' %}picked{% else %}notpicked{% endif %}" id="pickup-icon">
+      <span id="pickup-emoji">{% if pickup_status == 'Picked' %}✅{% else %}⏳{% endif %}</span>
+    </div>
+    <div class="status-info">
+      <h3>Pickup Status</h3>
+      <div class="status-value {% if pickup_status == 'Picked' %}picked-text{% else %}notpicked-text{% endif %}" id="pickup-text">
+        <span id="pickup-label">{{ pickup_status }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Total Pickups -->
+  <div class="status-card">
+    <div class="status-icon conn">
+      <span>📊</span>
+    </div>
+    <div class="status-info">
+      <h3>Total Pickups</h3>
+      <div class="status-value connected" id="total-pickups">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Latest Capture ===== -->
+<div class="capture-section">
+  <h2>📸 Latest Captured Image</h2>
+  <div class="capture-body" id="capture-body">
+    {% if latest %}
+    <div class="capture-image">
+      <img src="{{ url_for('static', filename=latest['image_path']) }}"
+           alt="Captured object"
+           onclick="openLightbox(this.src)"
+           style="cursor:zoom-in" />
+    </div>
+    <div class="capture-meta">
+      <div class="meta-item">
+        <label>Pickup Status</label>
+        <span class="badge {% if latest['pickup_status']=='Picked' %}picked{% else %}notpicked{% endif %}">
+          {{ latest['pickup_status'] }}
+        </span>
+      </div>
+      <div class="meta-item">
+        <label>Date</label>
+        <span>{{ latest['captured_date'] }}</span>
+      </div>
+      <div class="meta-item">
+        <label>Time</label>
+        <span>{{ latest['captured_time'] }}</span>
+      </div>
+      <a class="btn btn-primary btn-sm" href="/download/{{ latest['image_path'].replace('uploads/','') }}">
+        ⬇️ Download Image
+      </a>
+    </div>
+    {% else %}
+    <p class="placeholder-text" id="no-capture-msg">
+      No images captured yet. Waiting for ESP32-CAM to send an image…
+    </p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // --- Scanning toggle ---
+  let isScanning = {{ 'true' if scanning else 'false' }};
+  let pollInterval = null;
+
+  function updateScanBtnUI(active) {
+    const btn   = document.getElementById('scan-btn');
+    const text  = document.getElementById('scan-btn-text');
+    const pulse = document.getElementById('scan-btn-pulse');
+    if (active) {
+      btn.classList.add('active');
+      text.textContent = 'Stop Scanning';
+    } else {
+      btn.classList.remove('active');
+      text.textContent = 'Start Scanning';
+    }
+  }
+
+  async function toggleScanning() {
+    try {
+      const res  = await fetch('/api/scanning', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !isScanning })
+      });
+      const data = await res.json();
+      isScanning = data.scanning;
+      updateScanBtnUI(isScanning);
+      managePoll();
+      if (isScanning) refreshStatus();   // immediate first poll
+    } catch (err) {
+      console.error('Toggle scanning error:', err);
+    }
+  }
+
+  function managePoll() {
+    if (isScanning && !pollInterval) {
+      pollInterval = setInterval(refreshStatus, 3000);
+    } else if (!isScanning && pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  }
+
+  // Poll the status API every 3 seconds (only when scanning)
+  async function refreshStatus() {
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+
+      // --- Connection ---
+      const connIcon  = document.getElementById('conn-icon');
+      const connEmoji = document.getElementById('conn-emoji');
+      const connDot   = document.getElementById('conn-dot');
+      const connLabel = document.getElementById('conn-label');
+      const connText  = document.getElementById('conn-text');
+
+      if (data.connected) {
+        connIcon.className  = 'status-icon conn';
+        connEmoji.textContent = '📡';
+        connDot.className   = 'live-dot green';
+        connLabel.textContent = 'Connected';
+        connText.className  = 'status-value connected';
+      } else {
+        connIcon.className  = 'status-icon disconn';
+        connEmoji.textContent = '🔌';
+        connDot.className   = 'live-dot red';
+        connLabel.textContent = 'Disconnected';
+        connText.className  = 'status-value disconnected';
+      }
+
+      // --- Pickup ---
+      const pickupIcon  = document.getElementById('pickup-icon');
+      const pickupEmoji = document.getElementById('pickup-emoji');
+      const pickupLabel = document.getElementById('pickup-label');
+      const pickupText  = document.getElementById('pickup-text');
+
+      if (data.pickup_status === 'Picked') {
+        pickupIcon.className  = 'status-icon picked';
+        pickupEmoji.textContent = '✅';
+        pickupLabel.textContent = 'Picked';
+        pickupText.className  = 'status-value picked-text';
+      } else {
+        pickupIcon.className  = 'status-icon notpicked';
+        pickupEmoji.textContent = '⏳';
+        pickupLabel.textContent = 'Not Picked';
+        pickupText.className  = 'status-value notpicked-text';
+      }
+
+      // --- Latest Image ---
+      const captureBody = document.getElementById('capture-body');
+      if (data.latest) {
+        const imgSrc = '/static/' + data.latest.image_path;
+        captureBody.innerHTML = `
+          <div class="capture-image">
+            <img src="${imgSrc}" alt="Captured object"
+                 onclick="openLightbox(this.src)" style="cursor:zoom-in" />
+          </div>
+          <div class="capture-meta">
+            <div class="meta-item">
+              <label>Pickup Status</label>
+              <span class="badge ${data.latest.pickup_status==='Picked'?'picked':'notpicked'}">
+                ${data.latest.pickup_status}
+              </span>
+            </div>
+            <div class="meta-item"><label>Date</label><span>${data.latest.captured_date}</span></div>
+            <div class="meta-item"><label>Time</label><span>${data.latest.captured_time}</span></div>
+            <a class="btn btn-primary btn-sm" href="/download/${data.latest.image_path.replace('uploads/','')}">
+              ⬇️ Download Image
+            </a>
+          </div>`;
+      }
+
+      // --- Total pickups ---
+      const histRes = await fetch('/api/history');
+      const hist = await histRes.json();
+      document.getElementById('total-pickups').textContent = hist.length;
+
+    } catch (err) {
+      console.error('Status poll error:', err);
+    }
+  }
+
+  // Initial: only start polling if scanning is already active
+  if (isScanning) {
+    refreshStatus();
+  }
+  managePoll();
+</script>
+{% endblock %}

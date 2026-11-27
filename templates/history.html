@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Pickup History – Smart Robotic Arm{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="page-header">
+  <h1>📋 Pickup History</h1>
+  <p>Browse, search, and download all captured pickup images</p>
+</div>
+
+<!-- Filter Bar -->
+<form class="filter-bar" id="filter-form" method="GET" action="/history">
+  <input type="text" name="search" placeholder="🔍  Search by date or time…"
+         value="{{ search }}" />
+  <select name="status">
+    <option value="">All Statuses</option>
+    <option value="Picked" {% if status_filter == 'Picked' %}selected{% endif %}>Picked</option>
+    <option value="Not Picked" {% if status_filter == 'Not Picked' %}selected{% endif %}>Not Picked</option>
+  </select>
+  <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+  <a href="/history" class="btn btn-outline btn-sm">Clear</a>
+</form>
+
+<!-- History Grid -->
+{% if records %}
+<div class="history-grid" id="history-grid">
+  {% for r in records %}
+  <div class="history-card">
+    <img src="{{ url_for('static', filename=r['image_path']) }}"
+         alt="Pickup #{{ r['id'] }}"
+         onclick="openLightbox(this.src)"
+         style="cursor:zoom-in" />
+    <div class="history-card-body">
+      <span class="badge {% if r['pickup_status']=='Picked' %}picked{% else %}notpicked{% endif %}">
+        {{ r['pickup_status'] }}
+      </span>
+      <span class="datetime">📅 {{ r['captured_date'] }} &nbsp; 🕐 {{ r['captured_time'] }}</span>
+      <div class="actions">
+        <a class="btn btn-outline btn-sm" href="/download/{{ r['image_path'].replace('uploads/','') }}">
+          ⬇️ Download
+        </a>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="3" y="3" width="18" height="18" rx="3"/>
+    <path d="M3 15l5-5 4 4 4-6 5 5"/>
+  </svg>
+  <h3>No Records Found</h3>
+  <p>{% if search or status_filter %}Try adjusting your search or filter.{% else %}Captured images will appear here once the robotic arm picks an object.{% endif %}</p>
+</div>
+{% endif %}
+{% endblock %}
